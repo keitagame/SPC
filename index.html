@@ -558,6 +558,65 @@ function readStr(data, offset, len) {
   }
   return s.trim();
 }
+class SPCMusicSequencer {
+  constructor(spcFile, dsp) {
+    this.ram = spcFile.ram;
+    this.dsp = dsp;
+
+    this.time = 0;
+    this.events = [];
+
+    this.extractEvents();
+  }
+
+  extractEvents() {
+    // 簡易：RAMからDSP書き込みパターンを探索
+    for (let i = 0; i < 65536 - 3; i++) {
+      if (this.ram[i] === 0x8F) { // MOV dp,#imm (多くのドライバ)
+        const val = this.ram[i+1];
+        const addr = this.ram[i+2];
+
+        // DSP I/Oポート
+        if (addr === 0xF2) {
+          const dspAddr = val;
+          const next = this.ram[i+3];
+
+          if (next === 0x8F) {
+            const dspVal = this.ram[i+4];
+            const port = this.ram[i+5];
+
+            if (port === 0xF3) {
+              this.events.push({
+                time: this.events.length * 2000,
+                addr: dspAddr,
+                val: dspVal
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // なければ初期DSPをイベント化
+    if (this.events.length === 0) {
+      for (let i = 0; i < 128; i++) {
+        this.events.push({
+          time: i * 1000,
+          addr: i,
+          val: this.dsp.regs[i]
+        });
+      }
+    }
+  }
+
+  tick(sample) {
+    while (this.events.length &&
+           sample >= this.events[0].time) {
+      const ev = this.events.shift();
+      this.dsp.writeReg(ev.addr, ev.val);
+    }
+  }
+}
 class SPC700 {
   constructor(spcFile, dsp) {
     this.ram = spcFile.ram;
@@ -578,7 +637,26 @@ class SPC700 {
 
     this.dspAddr = 0;
   }
+push(v){
+  this.ram[0x100 + this.sp] = v;
+  this.sp = (this.sp - 1) & 255;
+}
 
+pop(){
+  this.sp = (this.sp + 1) & 255;
+  return this.ram[0x100 + this.sp];
+}
+setZN(v){
+  if (v===0) this.psw |= 0x02;
+  else this.psw &= ~0x02;
+
+  if (v&0x80) this.psw |= 0x80;
+  else this.psw &= ~0x80;
+}
+
+zeroFlag(){
+  return (this.psw & 0x02) !== 0;
+}
   step() {
     const op = this.ram[this.pc++];
 
@@ -602,7 +680,47 @@ class SPC700 {
         this.a = this.read(addr);
         break;
       }
+case 0x3F: { // CALL abs
+  const lo = this.ram[this.pc++];
+  const hi = this.ram[this.pc++];
+  const addr = lo | (hi<<8);
+  this.push((this.pc>>8)&255);
+  this.push(this.pc&255);
+  this.pc = addr;
+  break;
+}
 
+case 0x6F: { // RET
+  const lo = this.pop();
+  const hi = this.pop();
+  this.pc = lo | (hi<<8);
+  break;
+}
+case 0xD0: { // BNE
+  const rel = this.ram[this.pc++];
+  if (!this.zeroFlag())
+    this.pc += (rel<128?rel:rel-256);
+  break;
+}
+
+case 0xF0: { // BEQ
+  const rel = this.ram[this.pc++];
+  if (this.zeroFlag())
+    this.pc += (rel<128?rel:rel-256);
+  break;
+}
+case 0x68: { // CMP A,#imm
+  const v = this.ram[this.pc++];
+  const r = (this.a - v)&255;
+  this.setZN(r);
+  break;
+}
+case 0x88: { // ADC A,#imm
+  const v = this.ram[this.pc++];
+  this.a = (this.a + v)&255;
+  this.setZN(this.a);
+  break;
+}
       // INC addr
       case 0xAB: {
         const addr = this.ram[this.pc++];
@@ -909,8 +1027,8 @@ document.getElementById('fileInput').onchange = async (e) => {
 const spc = new SPC700(spcFile, dsp);
     // Render audio
     const totalSamples = SAMPLE_RATE * playDuration;
-    audioBuffer = renderAudio(dsp, totalSamples,spc);
-
+    //audioBuffer = renderAudio(dsp, totalSamples,spc);
+audioBuffer = renderAudio(dsp, totalSamples, spcFile);
     // Build viz data (downsample for waveform)
     buildVizData(audioBuffer);
 
@@ -923,28 +1041,30 @@ const spc = new SPC700(spcFile, dsp);
     console.error(err);
   }
 };
+function renderAudio(dsp, totalSamples, spcFile) {
 
-function renderAudio(dsp, totalSamples, spc) {
+  const spc = new SPC700(spcFile, dsp); // ← CPUを使う
 
   const L = new Float32Array(totalSamples);
   const R = new Float32Array(totalSamples);
 
-  for (let i=0;i<totalSamples;i++) {
+  for (let i = 0; i < totalSamples; i++) {
 
-    // CPUを動かす（1サンプルあたり数ステップ）
-    for (let c=0;c<8;c++) {
+    // ⭐ CPUを回す（ここが最重要）
+    for (let c = 0; c < 64; c++) {
       spc.step();
     }
+
     spc.tickTimers();
 
-    const [l,r] = dsp.render();
+    const [l, r] = dsp.render();
+
     L[i] = l;
     R[i] = r;
   }
 
-  return {L,R,length:totalSamples};
+  return {L, R, length: totalSamples};
 }
-
 function buildVizData(audioBuf) {
   const downsample = 256;
   const n = Math.floor(audioBuf.length / downsample);
