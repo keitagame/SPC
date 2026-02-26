@@ -558,7 +558,112 @@ function readStr(data, offset, len) {
   }
   return s.trim();
 }
+class SPC700 {
+  constructor(spcFile, dsp) {
+    this.ram = spcFile.ram;
+    this.dsp = dsp;
 
+    this.pc = spcFile.pc;
+    this.a = spcFile.a;
+    this.x = spcFile.x;
+    this.y = spcFile.y;
+    this.sp = spcFile.sp;
+    this.psw = spcFile.psw;
+
+    this.cycles = 0;
+
+    this.timer = [0,0,0];
+    this.timerTarget = [0,0,0];
+    this.timerCounter = [0,0,0];
+
+    this.dspAddr = 0;
+  }
+
+  step() {
+    const op = this.ram[this.pc++];
+
+    switch(op) {
+
+      // MOV A, #imm
+      case 0xE8:
+        this.a = this.ram[this.pc++];
+        break;
+
+      // MOV addr, A
+      case 0xC4: {
+        const addr = this.ram[this.pc++];
+        this.write(addr, this.a);
+        break;
+      }
+
+      // MOV A, addr
+      case 0xE4: {
+        const addr = this.ram[this.pc++];
+        this.a = this.read(addr);
+        break;
+      }
+
+      // INC addr
+      case 0xAB: {
+        const addr = this.ram[this.pc++];
+        this.write(addr, (this.read(addr)+1)&255);
+        break;
+      }
+
+      // DEC addr
+      case 0x8B: {
+        const addr = this.ram[this.pc++];
+        this.write(addr, (this.read(addr)-1)&255);
+        break;
+      }
+
+      // BRA
+      case 0x2F: {
+        const rel = this.ram[this.pc++];
+        this.pc += (rel < 128 ? rel : rel-256);
+        break;
+      }
+
+      // NOP
+      case 0x00:
+        break;
+
+      default:
+        // 未実装はNOP扱い（最小）
+        break;
+    }
+  }
+
+  read(addr) {
+    if (addr === 0xFD) return this.timer[0];
+    if (addr === 0xFE) return this.timer[1];
+    if (addr === 0xFF) return this.timer[2];
+    return this.ram[addr];
+  }
+
+  write(addr, v) {
+    this.ram[addr] = v;
+
+    // DSP I/O
+    if (addr === 0xF2) this.dspAddr = v;
+    if (addr === 0xF3) this.dsp.writeReg(this.dspAddr, v);
+
+    // timer setup
+    if (addr >= 0xFA && addr <= 0xFC) {
+      this.timerTarget[addr-0xFA] = v;
+    }
+  }
+
+  tickTimers() {
+    for (let i=0;i<3;i++) {
+      this.timerCounter[i]++;
+      if (this.timerCounter[i] >= this.timerTarget[i]) {
+        this.timerCounter[i] = 0;
+        this.timer[i] = (this.timer[i]+1)&255;
+      }
+    }
+  }
+}
 // --- DSP Emulator ---
 class SNESDSP {
   constructor(spcFile) {
@@ -681,7 +786,30 @@ class SNESDSP {
 
     return [L * mvL, R * mvR];
   }
+writeReg(addr, val) {
+  this.regs[addr] = val;
 
+  if (addr === 0x4C) { // KON
+    this.kon = val;
+    for (let v=0;v<8;v++) {
+      if (val & (1<<v)) {
+        const voice = this.voices[v];
+        voice.active = true;
+        voice.brrPos = 0;
+        voice.envLevel = 0;
+        voice.envMode = 0;
+      }
+    }
+  }
+
+  if (addr === 0x5C) { // KOF
+    for (let v=0;v<8;v++) {
+      if (val & (1<<v)) {
+        this.voices[v].envMode = 3;
+      }
+    }
+  }
+}
   getVoiceLevels() {
     return this.voices.map(v => {
       if (!v.active || !v.decoded) return 0;
@@ -773,11 +901,15 @@ document.getElementById('fileInput').onchange = async (e) => {
   await new Promise(r => setTimeout(r, 0));
 
   try {
-    const dsp = new SNESDSP(spcFile);
+    
 
+
+
+    const dsp = new SNESDSP(spcFile);
+const spc = new SPC700(spcFile, dsp);
     // Render audio
     const totalSamples = SAMPLE_RATE * playDuration;
-    audioBuffer = renderAudio(dsp, totalSamples);
+    audioBuffer = renderAudio(dsp, totalSamples,spc);
 
     // Build viz data (downsample for waveform)
     buildVizData(audioBuffer);
@@ -792,29 +924,25 @@ document.getElementById('fileInput').onchange = async (e) => {
   }
 };
 
-function renderAudio(dsp, totalSamples) {
+function renderAudio(dsp, totalSamples, spc) {
+
   const L = new Float32Array(totalSamples);
   const R = new Float32Array(totalSamples);
 
-  // We also capture voice levels at intervals for visualization
-  const voiceCapInterval = 2000; // every 2000 samples
-  const voiceCaptures = [];
+  for (let i=0;i<totalSamples;i++) {
 
-  for (let i = 0; i < totalSamples; i++) {
-    const [l, r] = dsp.render();
+    // CPUを動かす（1サンプルあたり数ステップ）
+    for (let c=0;c<8;c++) {
+      spc.step();
+    }
+    spc.tickTimers();
+
+    const [l,r] = dsp.render();
     L[i] = l;
     R[i] = r;
-
-    if (i % voiceCapInterval === 0) {
-      voiceCaptures.push(dsp.getVoiceLevels());
-    }
   }
 
-  // Store voice captures globally
-  window._voiceCaptures = voiceCaptures;
-  window._voiceCapInterval = voiceCapInterval;
-
-  return { L, R, length: totalSamples };
+  return {L,R,length:totalSamples};
 }
 
 function buildVizData(audioBuf) {
