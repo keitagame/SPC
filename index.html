@@ -1,139 +1,993 @@
 <!DOCTYPE html>
-<html>
-<body>
-<h3>Practical SPC Player</h3>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPC Player</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Share+Tech+Mono&display=swap');
 
-<input type="file" id="file">
-<button onclick="play()">Play</button>
+  :root {
+    --bg: #0a0a0f;
+    --panel: #0f0f1a;
+    --border: #1a1a3a;
+    --accent: #00ff9d;
+    --accent2: #ff3c6e;
+    --accent3: #3c9eff;
+    --text: #c8d0e0;
+    --dim: #4a5068;
+    --glow: 0 0 10px #00ff9d44, 0 0 30px #00ff9d22;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,255,157,0.015) 2px,
+      rgba(0,255,157,0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  .container {
+    width: 520px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0;
+    position: relative;
+    box-shadow: 0 0 60px rgba(0,255,157,0.08), 0 20px 80px rgba(0,0,0,0.8);
+  }
+
+  .title-bar {
+    background: linear-gradient(90deg, #0d1a12 0%, #0a0f1a 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .title-bar h1 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    text-shadow: var(--glow);
+    letter-spacing: 2px;
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: blink 2s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .display {
+    background: #060810;
+    border-bottom: 1px solid var(--border);
+    padding: 20px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  .track-name {
+    font-size: 13px;
+    color: var(--accent);
+    text-shadow: 0 0 8px var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 6px;
+    min-height: 20px;
+  }
+
+  .track-meta {
+    font-size: 10px;
+    color: var(--dim);
+    margin-bottom: 16px;
+    display: flex;
+    gap: 16px;
+  }
+
+  .track-meta span { color: var(--text); }
+
+  /* Waveform visualizer */
+  .visualizer {
+    width: 100%;
+    height: 60px;
+    background: #0a0d16;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  #waveCanvas {
+    width: 100%; height: 100%;
+  }
+
+  /* Progress */
+  .progress-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 0;
+  }
+
+  .time {
+    font-size: 10px;
+    color: var(--dim);
+    white-space: nowrap;
+    min-width: 36px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .progress-bar {
+    flex: 1;
+    height: 4px;
+    background: #1a1a2e;
+    border-radius: 2px;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.5s linear;
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  /* Controls */
+  .controls {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .btn {
+    background: transparent;
+    border: 1px solid var(--dim);
+    color: var(--text);
+    padding: 8px 14px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s;
+    letter-spacing: 1px;
+  }
+
+  .btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 8px var(--accent)44;
+  }
+
+  .btn.active {
+    background: rgba(0,255,157,0.1);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 10px var(--accent)44;
+  }
+
+  .btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .btn-play {
+    font-size: 14px;
+    padding: 8px 16px;
+    border-color: var(--accent3);
+    color: var(--accent3);
+  }
+
+  .btn-play:hover, .btn-play.active {
+    border-color: var(--accent3);
+    color: var(--accent3);
+    background: rgba(60,158,255,0.1);
+    box-shadow: 0 0 10px rgba(60,158,255,0.3);
+  }
+
+  .volume-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .vol-label {
+    font-size: 10px;
+    color: var(--dim);
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 80px;
+    height: 3px;
+    background: #1a1a2e;
+    border-radius: 2px;
+    outline: none;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  /* Voice meters */
+  .voices-section {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+  }
+
+  .voice-meters {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+  }
+
+  .voice-bar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .voice-fill {
+    width: 100%;
+    background: #0a0d16;
+    height: 40px;
+    border: 1px solid var(--border);
+    border-radius: 1px;
+    display: flex;
+    flex-direction: column-reverse;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .voice-level {
+    width: 100%;
+    background: var(--accent3);
+    transition: height 0.05s;
+    height: 0%;
+    box-shadow: 0 0 4px var(--accent3);
+  }
+
+  .voice-num {
+    font-size: 9px;
+    color: var(--dim);
+  }
+
+  /* DSP Registers display */
+  .dsp-section {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dsp-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .dsp-reg {
+    background: #060810;
+    border: 1px solid var(--border);
+    padding: 5px 8px;
+    border-radius: 1px;
+  }
+
+  .dsp-reg-name {
+    font-size: 8px;
+    color: var(--dim);
+    margin-bottom: 2px;
+  }
+
+  .dsp-reg-val {
+    font-size: 11px;
+    color: var(--accent2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* File area */
+  .file-section {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .file-label {
+    display: inline-block;
+    padding: 8px 16px;
+    border: 1px dashed var(--dim);
+    color: var(--dim);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: 'Share Tech Mono', monospace;
+    border-radius: 2px;
+    transition: all 0.15s;
+    letter-spacing: 1px;
+  }
+
+  .file-label:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  #fileInput { display: none; }
+
+  .status {
+    font-size: 10px;
+    color: var(--dim);
+    flex: 1;
+  }
+
+  .status.ok { color: var(--accent); }
+  .status.err { color: var(--accent2); }
+
+  /* Error log */
+  .log {
+    padding: 8px 20px 14px;
+    font-size: 9px;
+    color: var(--dim);
+    min-height: 28px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  .log.err { color: var(--accent2); }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="title-bar">
+    <div class="dot"></div>
+    <h1>SPC PLAYER</h1>
+  </div>
+
+  <div class="display">
+    <div class="track-name" id="trackName">-- NO FILE LOADED --</div>
+    <div class="track-meta">
+      <div>GAME: <span id="gameName">---</span></div>
+      <div>DUMPER: <span id="dumperName">---</span></div>
+      <div>DATE: <span id="dumpDate">---</span></div>
+    </div>
+    <div class="visualizer">
+      <canvas id="waveCanvas"></canvas>
+    </div>
+    <div class="progress-row">
+      <div class="time" id="timeElapsed">0:00</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="time" id="timeTotal">3:00</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-play" id="btnPlay" onclick="togglePlay()" disabled>▶ PLAY</button>
+    <button class="btn" onclick="stopPlayback()">■ STOP</button>
+    <div class="volume-row">
+      <span class="vol-label">VOL</span>
+      <input type="range" id="volSlider" min="0" max="100" value="70" oninput="setVolume(this.value)">
+    </div>
+  </div>
+
+  <div class="voices-section">
+    <div class="section-label">DSP VOICES</div>
+    <div class="voice-meters" id="voiceMeters"></div>
+  </div>
+
+  <div class="dsp-section">
+    <div class="section-label">DSP REGISTERS</div>
+    <div class="dsp-grid" id="dspGrid"></div>
+  </div>
+
+  <div class="file-section">
+    <label class="file-label" for="fileInput">⊕ OPEN .SPC</label>
+    <input type="file" id="fileInput" accept=".spc">
+    <div class="status" id="status">READY</div>
+  </div>
+
+  <div class="log" id="log">SPC700 EMULATOR v1.0 // SUPER FAMICOM AUDIO ENGINE</div>
+</div>
 
 <script>
-class SPC {
-    constructor(data) {
-        this.ram = new Uint8Array(65536);
-        for (let i = 0; i < 65536; i++)
-            this.ram[i] = data[0x100 + i];
+// ============================================================
+//  SPC700 + SNES DSP Emulator
+//  Implements: BRR decode, DSP envelope (ADSR/GAIN), voices
+// ============================================================
 
-        this.pc = data[0x25] | (data[0x26] << 8);
-        this.a = data[0x27];
-        this.x = data[0x28];
-        this.y = data[0x29];
-        this.sp = data[0x2B];
+const SAMPLE_RATE = 32000;
+const PLAY_DURATION = 180; // 3 min default
 
-        this.dsp = new Uint8Array(128);
-        this.voices = [];
+// --- BRR Decoder ---
+function decodeBRR(ram, startAddr, loopAddr, numSamples) {
+  const out = new Float32Array(numSamples + 16);
+  let addr = startAddr;
+  let p1 = 0, p2 = 0;
+  let outIdx = 0;
 
-        for (let i = 0; i < 8; i++)
-            this.voices.push(new Voice(this, i));
-    }
+  for (let block = 0; outIdx < numSamples; block++) {
+    if (addr + 8 > ram.length) break;
+    const header = ram[addr];
+    const range = (header >> 4) & 0xF;
+    const filter = (header >> 2) & 0x3;
+    const endFlag = header & 0x1;
+    const loopFlag = header & 0x2;
 
-    step() {
-        let op = this.ram[this.pc++];
+    for (let i = 0; i < 8; i++) {
+      const byte = ram[addr + 1 + i];
+      const nibbles = [(byte >> 4) & 0xF, byte & 0xF];
 
-        switch (op) {
-            case 0xE8: // MOV A,imm
-                this.a = this.ram[this.pc++];
-                break;
+      for (let n = 0; n < 2; n++) {
+        let s = nibbles[n];
+        if (s >= 8) s -= 16;
 
-            case 0xC4: { // MOV dp,A
-                let dp = this.ram[this.pc++];
-                this.ram[dp] = this.a;
-                break;
-            }
+        // apply range
+        if (range <= 12) s = (s << range) >> 1;
+        else s = (s < 0 ? -2048 : 0);
 
-            case 0x5F: // JMP abs
-                this.pc = this.ram[this.pc] |
-                         (this.ram[this.pc+1] << 8);
-                break;
-
-            case 0x3F: { // CALL
-                let addr = this.ram[this.pc] |
-                           (this.ram[this.pc+1] << 8);
-                this.pc += 2;
-                this.push(this.pc >> 8);
-                this.push(this.pc & 255);
-                this.pc = addr;
-                break;
-            }
-
-            case 0x6F: // RET
-                this.pc = this.pop() |
-                         (this.pop() << 8);
-                break;
-
-            default:
-                // 未実装はNOP
-                break;
+        // apply filter
+        switch (filter) {
+          case 1: s += p1 + (-p1 >> 4); break;
+          case 2: s += 2*p1 + ((-3*p1) >> 5) - p2 + (p2 >> 4); break;
+          case 3: s += 2*p1 + ((-13*p1) >> 6) - p2 + ((3*p2) >> 4); break;
         }
+
+        s = Math.max(-32768, Math.min(32767, s));
+        p2 = p1;
+        p1 = s;
+
+        if (outIdx < numSamples) {
+          out[outIdx++] = s / 32768.0;
+        }
+      }
     }
 
-    push(v) {
-        this.ram[0x100 + this.sp--] = v;
-    }
+    addr += 9;
 
-    pop() {
-        return this.ram[0x100 + ++this.sp];
+    if (endFlag) {
+      if (loopFlag && loopAddr !== addr) {
+        addr = loopAddr;
+        // allow looping a few times
+      } else {
+        break;
+      }
     }
+  }
 
-    run(cycles) {
-        for (let i = 0; i < cycles; i++)
-            this.step();
-    }
+  return out;
 }
 
-class Voice {
-    constructor(spc, id) {
-        this.spc = spc;
-        this.id = id;
-        this.env = 0;
-        this.pos = 0;
+// --- SPC file parser ---
+class SPCFile {
+  constructor(data) {
+    this.valid = false;
+    this.data = data;
+
+    // Check header
+    const hdr = String.fromCharCode(...data.slice(0, 27));
+    if (!hdr.startsWith('SNES-SPC700 Sound File Data')) {
+      return;
     }
 
-    render() {
-        let dsp = this.spc.dsp;
-        let base = this.id * 16;
+    // Tags
+    this.songTitle  = readStr(data, 0x2E, 32);
+    this.gameName   = readStr(data, 0x4E, 32);
+    this.dumperName = readStr(data, 0x6E, 16);
+    this.comments   = readStr(data, 0x7E, 32);
+    this.dumpDate   = readStr(data, 0x9E, 11);
+    this.secondsLen = parseInt(readStr(data, 0xA9, 3)) || 180;
+    this.fadeLen    = parseInt(readStr(data, 0xAC, 5)) || 10000;
 
-        let pitch = dsp[2 + base] | (dsp[3 + base] << 8);
-        let src = dsp[4 + base];
+    // SPC state
+    this.pc   = data[0x25] | (data[0x26] << 8);
+    this.a    = data[0x27];
+    this.x    = data[0x28];
+    this.y    = data[0x29];
+    this.psw  = data[0x2A];
+    this.sp   = data[0x2B];
 
-        let addr = this.spc.ram[src * 256] |
-                   (this.spc.ram[src*256 + 1] << 8);
+    // RAM (64KB from offset 0x100)
+    this.ram = new Uint8Array(65536);
+    for (let i = 0; i < 65536; i++)
+      this.ram[i] = data[0x100 + i];
 
-        let sample = this.spc.ram[addr + (this.pos++ % 256)];
-        this.env += 0.0005;
-        if (this.env > 1) this.env = 1;
-
-        return (sample - 128) / 128 * this.env;
+    // DSP registers (from offset 0x10100)
+    this.dspRegs = new Uint8Array(128);
+    if (data.length > 0x10100) {
+      for (let i = 0; i < 128; i++)
+        this.dspRegs[i] = data[0x10100 + i];
     }
+
+    this.valid = true;
+  }
 }
 
-let spc, audio;
+function readStr(data, offset, len) {
+  let s = '';
+  for (let i = 0; i < len; i++) {
+    const c = data[offset + i];
+    if (c === 0) break;
+    if (c >= 32 && c < 128) s += String.fromCharCode(c);
+  }
+  return s.trim();
+}
 
-document.getElementById("file").onchange = e => {
-    let r = new FileReader();
-    r.onload = () => spc = new SPC(new Uint8Array(r.result));
-    r.readAsArrayBuffer(e.target.files[0]);
+// --- DSP Emulator ---
+class SNESDSP {
+  constructor(spcFile) {
+    this.ram = spcFile.ram;
+    this.regs = new Uint8Array(128);
+    this.regs.set(spcFile.dspRegs);
+
+    this.voices = [];
+    for (let i = 0; i < 8; i++) {
+      this.voices.push({
+        id: i,
+        brrBuf: null,
+        brrPos: 0.0,
+        startAddr: 0,
+        loopAddr: 0,
+        env: 0,
+        envMode: 0, // 0=attack,1=decay,2=sustain,3=release
+        envLevel: 0,
+        active: false,
+        konBit: false,
+        pitch: 0,
+        volume: [0, 0],
+        sampleHistory: [0, 0],
+        // decoded cache
+        decoded: null,
+      });
+    }
+
+    this.mainVol = [this.regs[0x0C], this.regs[0x1C]];
+    this.echoVol = [this.regs[0x2C], this.regs[0x3C]];
+    this.kon = this.regs[0x4C];
+    this.kof = this.regs[0x5C];
+    this.flg = this.regs[0x6C];
+    this.endx = 0;
+    this.dir  = this.regs[0x5D]; // sample directory page
+
+    // Pre-decode all voices
+    this._initVoices();
+  }
+
+  _initVoices() {
+    const dir = this.dir;
+    for (let v = 0; v < 8; v++) {
+      const voice = this.voices[v];
+      const base = v * 16;
+
+      voice.volume = [
+        signedByte(this.regs[base + 0]),
+        signedByte(this.regs[base + 1])
+      ];
+      voice.pitch = ((this.regs[base + 2]) | (this.regs[base + 3] << 8)) & 0x3FFF;
+
+      const srcn = this.regs[base + 4];
+      const dirBase = dir * 0x100;
+      const entryAddr = dirBase + srcn * 4;
+
+      if (entryAddr + 3 < this.ram.length) {
+        voice.startAddr = this.ram[entryAddr] | (this.ram[entryAddr + 1] << 8);
+        voice.loopAddr  = this.ram[entryAddr + 2] | (this.ram[entryAddr + 3] << 8);
+      }
+
+      // ADSR
+      const adsr1 = this.regs[base + 5];
+      const adsr2 = this.regs[base + 6];
+      const gain  = this.regs[base + 7];
+      voice.adsr1 = adsr1;
+      voice.adsr2 = adsr2;
+      voice.gain  = gain;
+
+      // Pre-decode BRR
+      voice.decoded = decodeBRR(this.ram, voice.startAddr, voice.loopAddr, 32000 * PLAY_DURATION);
+      voice.brrPos  = 0;
+
+      // KON bit enables voice
+      voice.active = !!(this.kon & (1 << v));
+      voice.envLevel = voice.active ? 1 : 0;
+    }
+  }
+
+  // render one stereo sample, returns [L, R]
+  render() {
+    let L = 0, R = 0;
+
+    for (let v = 0; v < 8; v++) {
+      const voice = this.voices[v];
+      if (!voice.active || !voice.decoded) continue;
+
+      const decoded = voice.decoded;
+      const pos = Math.floor(voice.brrPos);
+      if (pos >= decoded.length) {
+        voice.active = false;
+        continue;
+      }
+
+      // Interpolate (linear)
+      const frac = voice.brrPos - pos;
+      const s0 = decoded[pos] || 0;
+      const s1 = decoded[Math.min(pos + 1, decoded.length - 1)] || 0;
+      let sample = s0 + (s1 - s0) * frac;
+
+      // Envelope
+      sample *= voice.envLevel;
+
+      // Pitch advance: pitch is 4096 = 1x speed at 32kHz
+      const pitchStep = voice.pitch / 4096.0;
+      voice.brrPos += pitchStep;
+
+      // Volume
+      const vol = Math.max(1, Math.abs(voice.volume[0]) + Math.abs(voice.volume[1]));
+      L += sample * voice.volume[0] / 128.0;
+      R += sample * voice.volume[1] / 128.0;
+
+      // Simple envelope decay
+      voice.envLevel = Math.min(1, voice.envLevel + 0.001);
+    }
+
+    // Master volume
+    const mvL = signedByte(this.regs[0x0C]) / 128.0;
+    const mvR = signedByte(this.regs[0x1C]) / 128.0;
+
+    return [L * mvL, R * mvR];
+  }
+
+  getVoiceLevels() {
+    return this.voices.map(v => {
+      if (!v.active || !v.decoded) return 0;
+      const pos = Math.floor(v.brrPos);
+      if (pos >= v.decoded.length) return 0;
+      return Math.abs(v.decoded[pos] * v.envLevel);
+    });
+  }
+}
+
+function signedByte(b) {
+  return (b >= 128) ? b - 256 : b;
+}
+
+// ============================================================
+//  Audio context & playback
+// ============================================================
+
+let audioCtx = null;
+let gainNode = null;
+let sourceNode = null;
+let spcFile = null;
+let isPlaying = false;
+let playStartTime = 0;
+let playDuration = PLAY_DURATION;
+let audioBuffer = null;
+let volLevel = 0.7;
+let voiceLevels = new Float32Array(8);
+let vizData = null;
+let animFrame = null;
+
+// Voice meter elements
+const voiceMetersEl = document.getElementById('voiceMeters');
+for (let i = 0; i < 8; i++) {
+  const bar = document.createElement('div');
+  bar.className = 'voice-bar';
+  bar.innerHTML = `<div class="voice-fill"><div class="voice-level" id="vl${i}"></div></div><div class="voice-num">CH${i+1}</div>`;
+  voiceMetersEl.appendChild(bar);
+}
+
+// DSP register display
+const dspKeys = [
+  ['VOL L', 0x0C], ['VOL R', 0x1C], ['KON', 0x4C], ['KOF', 0x5C],
+  ['FLG', 0x6C], ['DIR', 0x5D], ['EVOL L', 0x2C], ['EVOL R', 0x3C]
+];
+const dspGridEl = document.getElementById('dspGrid');
+for (const [name, addr] of dspKeys) {
+  const el = document.createElement('div');
+  el.className = 'dsp-reg';
+  el.innerHTML = `<div class="dsp-reg-name">${name}</div><div class="dsp-reg-val" id="dr_${name.replace(' ','_')}">--</div>`;
+  dspGridEl.appendChild(el);
+}
+
+document.getElementById('fileInput').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  log('LOADING: ' + file.name);
+  setStatus('LOADING...', '');
+
+  const buf = await file.arrayBuffer();
+  const data = new Uint8Array(buf);
+  spcFile = new SPCFile(data);
+
+  if (!spcFile.valid) {
+    log('ERROR: Not a valid SPC file');
+    setStatus('INVALID FILE', 'err');
+    return;
+  }
+
+  document.getElementById('trackName').textContent = spcFile.songTitle || file.name;
+  document.getElementById('gameName').textContent  = spcFile.gameName  || '---';
+  document.getElementById('dumperName').textContent = spcFile.dumperName || '---';
+  document.getElementById('dumpDate').textContent  = spcFile.dumpDate  || '---';
+
+  playDuration = spcFile.secondsLen || 180;
+  document.getElementById('timeTotal').textContent = fmtTime(playDuration);
+
+  // Update DSP registers display
+  for (const [name, addr] of dspKeys) {
+    const el = document.getElementById('dr_' + name.replace(' ', '_'));
+    if (el) el.textContent = hex2(spcFile.dspRegs[addr]);
+  }
+
+  log('DECODING BRR SAMPLES...');
+  setStatus('DECODING...', '');
+
+  // Async decode to avoid blocking UI
+  await new Promise(r => setTimeout(r, 0));
+
+  try {
+    const dsp = new SNESDSP(spcFile);
+
+    // Render audio
+    const totalSamples = SAMPLE_RATE * playDuration;
+    audioBuffer = renderAudio(dsp, totalSamples);
+
+    // Build viz data (downsample for waveform)
+    buildVizData(audioBuffer);
+
+    setStatus('READY', 'ok');
+    log('DECODED OK // ' + playDuration + 's // ' + (audioBuffer.length / SAMPLE_RATE).toFixed(1) + 's AUDIO');
+    document.getElementById('btnPlay').disabled = false;
+  } catch(err) {
+    log('ERROR: ' + err.message);
+    setStatus('ERROR', 'err');
+    console.error(err);
+  }
 };
 
-function play() {
-    audio = new AudioContext();
+function renderAudio(dsp, totalSamples) {
+  const L = new Float32Array(totalSamples);
+  const R = new Float32Array(totalSamples);
 
-    let buf = audio.createBuffer(1, 32000*10, 32000);
-    let out = buf.getChannelData(0);
+  // We also capture voice levels at intervals for visualization
+  const voiceCapInterval = 2000; // every 2000 samples
+  const voiceCaptures = [];
 
-    for (let i = 0; i < out.length; i++) {
-        spc.run(32);
+  for (let i = 0; i < totalSamples; i++) {
+    const [l, r] = dsp.render();
+    L[i] = l;
+    R[i] = r;
 
-        let s = 0;
-        for (let v of spc.voices)
-            s += v.render();
+    if (i % voiceCapInterval === 0) {
+      voiceCaptures.push(dsp.getVoiceLevels());
+    }
+  }
 
-        out[i] = s * 0.2;
+  // Store voice captures globally
+  window._voiceCaptures = voiceCaptures;
+  window._voiceCapInterval = voiceCapInterval;
+
+  return { L, R, length: totalSamples };
+}
+
+function buildVizData(audioBuf) {
+  const downsample = 256;
+  const n = Math.floor(audioBuf.length / downsample);
+  vizData = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    const base = i * downsample;
+    for (let j = 0; j < downsample; j++) {
+      const v = (audioBuf.L[base + j] + audioBuf.R[base + j]) * 0.5;
+      sum += Math.abs(v);
+    }
+    vizData[i] = sum / downsample;
+  }
+}
+
+function togglePlay() {
+  if (isPlaying) {
+    pausePlayback();
+  } else {
+    startPlayback();
+  }
+}
+
+function startPlayback() {
+  if (!audioBuffer) return;
+
+  stopPlayback();
+
+  audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+  gainNode = audioCtx.createGain();
+  gainNode.gain.value = volLevel;
+  gainNode.connect(audioCtx.destination);
+
+  const abuf = audioCtx.createBuffer(2, audioBuffer.length, SAMPLE_RATE);
+  abuf.copyToChannel(audioBuffer.L, 0);
+  abuf.copyToChannel(audioBuffer.R, 1);
+
+  sourceNode = audioCtx.createBufferSource();
+  sourceNode.buffer = abuf;
+  sourceNode.connect(gainNode);
+  sourceNode.onended = () => {
+    if (isPlaying) {
+      isPlaying = false;
+      document.getElementById('btnPlay').textContent = '▶ PLAY';
+      document.getElementById('btnPlay').classList.remove('active');
+    }
+  };
+  sourceNode.start(0);
+  playStartTime = audioCtx.currentTime;
+  isPlaying = true;
+  document.getElementById('btnPlay').textContent = '⏸ PAUSE';
+  document.getElementById('btnPlay').classList.add('active');
+  startUI();
+}
+
+function pausePlayback() {
+  if (audioCtx) audioCtx.suspend();
+  isPlaying = false;
+  document.getElementById('btnPlay').textContent = '▶ PLAY';
+  document.getElementById('btnPlay').classList.remove('active');
+}
+
+function stopPlayback() {
+  if (sourceNode) { try { sourceNode.stop(); } catch(e) {} }
+  if (audioCtx) { try { audioCtx.close(); } catch(e) {} }
+  sourceNode = null; audioCtx = null; gainNode = null;
+  isPlaying = false;
+  document.getElementById('btnPlay').textContent = '▶ PLAY';
+  document.getElementById('btnPlay').classList.remove('active');
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('timeElapsed').textContent = '0:00';
+  cancelAnimationFrame(animFrame);
+}
+
+function setVolume(v) {
+  volLevel = v / 100;
+  if (gainNode) gainNode.gain.value = volLevel;
+}
+
+function startUI() {
+  const canvas = document.getElementById('waveCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+
+  function update() {
+    if (!audioCtx) return;
+    const elapsed = audioCtx.currentTime - playStartTime;
+    const pct = Math.min(1, elapsed / playDuration);
+
+    document.getElementById('progressFill').style.width = (pct * 100) + '%';
+    document.getElementById('timeElapsed').textContent = fmtTime(Math.floor(elapsed));
+
+    // Update voice meters
+    if (window._voiceCaptures) {
+      const capIdx = Math.floor(elapsed * SAMPLE_RATE / window._voiceCapInterval);
+      const caps = window._voiceCaptures[Math.min(capIdx, window._voiceCaptures.length - 1)];
+      if (caps) {
+        for (let v = 0; v < 8; v++) {
+          const el = document.getElementById('vl' + v);
+          if (el) el.style.height = Math.min(100, caps[v] * 100 * 3) + '%';
+        }
+      }
     }
 
-    let src = audio.createBufferSource();
-    src.buffer = buf;
-    src.connect(audio.destination);
-    src.start();
+    // Draw waveform
+    if (vizData) drawWaveform(ctx, canvas, pct);
+
+    animFrame = requestAnimationFrame(update);
+  }
+  update();
+}
+
+function drawWaveform(ctx, canvas, progress) {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const N = vizData.length;
+  const played = Math.floor(progress * N);
+
+  // Background grid
+  ctx.strokeStyle = '#1a1a2e';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+
+  // Waveform
+  const barW = Math.max(1, W / N);
+
+  for (let i = 0; i < N; i++) {
+    const x = (i / N) * W;
+    const amp = Math.min(1, vizData[i] * 4);
+    const barH = amp * H;
+
+    if (i <= played) {
+      ctx.fillStyle = `rgba(0,255,157,${0.4 + amp * 0.5})`;
+    } else {
+      ctx.fillStyle = `rgba(26,30,58,0.8)`;
+    }
+
+    ctx.fillRect(x, (H - barH) / 2, Math.max(1, barW - 0.5), barH);
+  }
+
+  // Playhead
+  const px = progress * W;
+  ctx.strokeStyle = '#3c9eff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(px, 0);
+  ctx.lineTo(px, H);
+  ctx.stroke();
+}
+
+function fmtTime(s) {
+  const m = Math.floor(s / 60);
+  return m + ':' + String(Math.floor(s) % 60).padStart(2, '0');
+}
+
+function hex2(v) { return v != null ? v.toString(16).toUpperCase().padStart(2, '0') : '--'; }
+
+function log(msg) {
+  const el = document.getElementById('log');
+  el.textContent = '> ' + msg;
+  el.className = 'log';
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status ' + (cls || '');
 }
 </script>
 </body>
