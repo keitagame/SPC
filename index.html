@@ -734,7 +734,115 @@ case 0x88: { // ADC A,#imm
         this.write(addr, (this.read(addr)-1)&255);
         break;
       }
+// MOV A,(X)
+case 0xF6: {
+  this.a = this.read(this.x);
+  this.setZN(this.a);
+  break;
+}
 
+// MOV (X),A
+case 0xD6: {
+  this.write(this.x, this.a);
+  break;
+}
+// MOV X,#imm
+case 0xCD:
+  this.x = this.ram[this.pc++];
+  this.setZN(this.x);
+  break;
+
+// MOV Y,#imm
+case 0x8D:
+  this.y = this.ram[this.pc++];
+  this.setZN(this.y);
+  break;
+
+// INC X
+case 0x3D:
+  this.x = (this.x + 1) & 255;
+  this.setZN(this.x);
+  break;
+// MOV dp,dp
+case 0xFA: {
+  const src = this.ram[this.pc++];
+  const dst = this.ram[this.pc++];
+  this.write(dst, this.read(src));
+  break;
+}
+// MOV dp,#imm
+case 0x8F: {
+  const imm = this.ram[this.pc++];
+  const dp = this.ram[this.pc++];
+  this.write(dp, imm);
+  break;
+}
+
+// MOV A,dp
+case 0xE4: {
+  const dp = this.ram[this.pc++];
+  this.a = this.read(dp);
+  this.setZN(this.a);
+  break;
+}
+
+// MOV dp,A
+case 0xC4: {
+  const dp = this.ram[this.pc++];
+  this.write(dp, this.a);
+  break;
+}
+// MOV !addr,A
+case 0xC5: {
+  const lo = this.ram[this.pc++];
+  const hi = this.ram[this.pc++];
+  const addr = lo | (hi<<8);
+  this.write(addr, this.a);
+  break;
+}
+
+// MOV A,!addr
+case 0xE5: {
+  const lo = this.ram[this.pc++];
+  const hi = this.ram[this.pc++];
+  const addr = lo | (hi<<8);
+  this.a = this.read(addr);
+  this.setZN(this.a);
+  break;
+}
+// MOV X,#imm
+case 0xCD:
+  this.x = this.ram[this.pc++];
+  this.setZN(this.x);
+  break;
+
+// MOV Y,#imm
+case 0x8D:
+  this.y = this.ram[this.pc++];
+  this.setZN(this.y);
+  break;
+  // DEC X
+case 0x1D:
+  this.x = (this.x - 1) & 255;
+  this.setZN(this.x);
+  break;
+
+// BNE（既にある）
+// MOV A,(X)
+case 0xE6:
+  this.a = this.read(this.x);
+  this.setZN(this.a);
+  break;
+
+// MOV (X),A
+case 0xC6:
+  this.write(this.x, this.a);
+  break;
+// DEC X
+case 0x1D:
+  this.x = (this.x - 1) & 255;
+  this.setZN(this.x);
+  break;
       // BRA
       case 0x2F: {
         const rel = this.ram[this.pc++];
@@ -746,9 +854,9 @@ case 0x88: { // ADC A,#imm
       case 0x00:
         break;
 
-      default:
-        // 未実装はNOP扱い（最小）
-        break;
+default:
+  
+  break;
     }
   }
 
@@ -760,17 +868,34 @@ case 0x88: { // ADC A,#imm
   }
 
   write(addr, v) {
-    this.ram[addr] = v;
 
-    // DSP I/O
-    if (addr === 0xF2) this.dspAddr = v;
-    if (addr === 0xF3) this.dsp.writeReg(this.dspAddr, v);
-
-    // timer setup
-    if (addr >= 0xFA && addr <= 0xFC) {
-      this.timerTarget[addr-0xFA] = v;
-    }
+  // DSP register select
+  if (addr === 0xF2) {
+    this.dspAddr = v & 0x7F;
+    return;
   }
+
+  // DSP data write
+  if (addr === 0xF3) {
+  console.log("a")
+  this.dsp.writeReg(this.dspAddr, v);
+}
+ 
+
+  // Timer control
+  if (addr === 0xF1) {
+    this.timerEnable = v;
+    return;
+  }
+
+  // Timer targets
+  if (addr >= 0xFA && addr <= 0xFC) {
+    this.timerTarget[addr - 0xFA] = v || 256;
+    return;
+  }
+
+  this.ram[addr] = v;
+}
 
   tickTimers() {
     for (let i=0;i<3;i++) {
