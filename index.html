@@ -983,6 +983,35 @@ case 0xC6:
   this.write(this.x, this.a);
   break;
 // DEC X
+case 0x28: { // AND A,#imm
+  const v = this.ram[this.pc++];
+  this.a &= v;
+  this.setZN(this.a);
+  break;
+}
+
+case 0x08: { // OR A,#imm
+  const v = this.ram[this.pc++];
+  this.a |= v;
+  this.setZN(this.a);
+  break;
+}
+
+case 0x48: { // EOR A,#imm
+  const v = this.ram[this.pc++];
+  this.a ^= v;
+  this.setZN(this.a);
+  break;
+}
+case 0x6E: {
+  const dp = this.ram[this.pc++];
+  let v = (this.read(dp) - 1) & 255;
+  this.write(dp, v);
+  const rel = this.ram[this.pc++];
+  if(v !== 0)
+    this.pc += (rel < 128 ? rel : rel-256);
+  break;
+}
 case 0x1D:
   this.x = (this.x - 1) & 255;
   this.setZN(this.x);
@@ -993,7 +1022,31 @@ case 0x1D:
         this.pc += (rel < 128 ? rel : rel-256);
         break;
       }
-
+case 0xCF: {
+  const r = this.a * this.y;
+  this.a = r & 255;
+  this.y = (r >> 8) & 255;
+  this.setZN(this.a);
+  break;
+}
+case 0x9E: {
+  if(this.x === 0){
+    this.psw |= 0x40;
+  } else {
+    const ya = (this.y<<8)|this.a;
+    this.a = Math.floor(ya / this.x);
+    this.y = ya % this.x;
+    this.setZN(this.a);
+  }
+  break;
+}
+case 0x2E: {
+  const dp = this.ram[this.pc++];
+  const rel = this.ram[this.pc++];
+  if(this.a !== this.read(dp))
+    this.pc += (rel<128?rel:rel-256);
+  break;
+}
       // NOP
       case 0x00:
         break;
@@ -1003,6 +1056,16 @@ default:
   break;
     }
   }
+getC(){ return this.psw & 1; }
+setC(v){ this.psw = v ? (this.psw|1):(this.psw&~1); }
+
+setZN(v){
+  if(v===0) this.psw |= 2;
+  else this.psw &= ~2;
+
+  if(v & 0x80) this.psw |= 0x80;
+  else this.psw &= ~0x80;
+}
 
   read(addr) {
     if (addr === 0xFD) return this.timer[0];
