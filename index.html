@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h3>Practical SPC Player</h3>
+
+<input type="file" id="file">
+<button onclick="play()">Play</button>
+
+<script>
+class SPC {
+    constructor(data) {
+        this.ram = new Uint8Array(65536);
+        for (let i = 0; i < 65536; i++)
+            this.ram[i] = data[0x100 + i];
+
+        this.pc = data[0x25] | (data[0x26] << 8);
+        this.a = data[0x27];
+        this.x = data[0x28];
+        this.y = data[0x29];
+        this.sp = data[0x2B];
+
+        this.dsp = new Uint8Array(128);
+        this.voices = [];
+
+        for (let i = 0; i < 8; i++)
+            this.voices.push(new Voice(this, i));
+    }
+
+    step() {
+        let op = this.ram[this.pc++];
+
+        switch (op) {
+            case 0xE8: // MOV A,imm
+                this.a = this.ram[this.pc++];
+                break;
+
+            case 0xC4: { // MOV dp,A
+                let dp = this.ram[this.pc++];
+                this.ram[dp] = this.a;
+                break;
+            }
+
+            case 0x5F: // JMP abs
+                this.pc = this.ram[this.pc] |
+                         (this.ram[this.pc+1] << 8);
+                break;
+
+            case 0x3F: { // CALL
+                let addr = this.ram[this.pc] |
+                           (this.ram[this.pc+1] << 8);
+                this.pc += 2;
+                this.push(this.pc >> 8);
+                this.push(this.pc & 255);
+                this.pc = addr;
+                break;
+            }
+
+            case 0x6F: // RET
+                this.pc = this.pop() |
+                         (this.pop() << 8);
+                break;
+
+            default:
+                // 未実装はNOP
+                break;
+        }
+    }
+
+    push(v) {
+        this.ram[0x100 + this.sp--] = v;
+    }
+
+    pop() {
+        return this.ram[0x100 + ++this.sp];
+    }
+
+    run(cycles) {
+        for (let i = 0; i < cycles; i++)
+            this.step();
+    }
+}
+
+class Voice {
+    constructor(spc, id) {
+        this.spc = spc;
+        this.id = id;
+        this.env = 0;
+        this.pos = 0;
+    }
+
+    render() {
+        let dsp = this.spc.dsp;
+        let base = this.id * 16;
+
+        let pitch = dsp[2 + base] | (dsp[3 + base] << 8);
+        let src = dsp[4 + base];
+
+        let addr = this.spc.ram[src * 256] |
+                   (this.spc.ram[src*256 + 1] << 8);
+
+        let sample = this.spc.ram[addr + (this.pos++ % 256)];
+        this.env += 0.0005;
+        if (this.env > 1) this.env = 1;
+
+        return (sample - 128) / 128 * this.env;
+    }
+}
+
+let spc, audio;
+
+document.getElementById("file").onchange = e => {
+    let r = new FileReader();
+    r.onload = () => spc = new SPC(new Uint8Array(r.result));
+    r.readAsArrayBuffer(e.target.files[0]);
+};
+
+function play() {
+    audio = new AudioContext();
+
+    let buf = audio.createBuffer(1, 32000*10, 32000);
+    let out = buf.getChannelData(0);
+
+    for (let i = 0; i < out.length; i++) {
+        spc.run(32);
+
+        let s = 0;
+        for (let v of spc.voices)
+            s += v.render();
+
+        out[i] = s * 0.2;
+    }
+
+    let src = audio.createBufferSource();
+    src.buffer = buf;
+    src.connect(audio.destination);
+    src.start();
+}
+</script>
+</body>
+</html>
