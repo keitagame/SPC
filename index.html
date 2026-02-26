@@ -29,7 +29,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
+    
   }
 
   body::before {
@@ -388,7 +388,15 @@
     <div class="dot"></div>
     <h1>SPC PLAYER</h1>
   </div>
-
+<div id="cpuTrace" style="
+  font-family: monospace;
+  white-space: pre;
+  background:#000;
+  color:#0f0;
+  height:200px;
+  overflow:auto;
+  padding:8px;
+"></div>
   <div class="display">
     <div class="track-name" id="trackName">-- NO FILE LOADED --</div>
     <div class="track-meta">
@@ -621,7 +629,9 @@ class SPC700 {
   constructor(spcFile, dsp) {
     this.ram = spcFile.ram;
     this.dsp = dsp;
-
+this.traceBuffer = "";
+    this.traceLines = 0;
+  
     this.pc = spcFile.pc;
     this.a = spcFile.a;
     this.x = spcFile.x;
@@ -641,7 +651,15 @@ push(v){
   this.ram[0x100 + this.sp] = v;
   this.sp = (this.sp - 1) & 255;
 }
+push(v){
+  this.write(0x100 | this.sp, v);
+  this.sp = (this.sp - 1) & 0xFF;
+}
 
+pop(){
+  this.sp = (this.sp + 1) & 0xFF;
+  return this.read(0x100 | this.sp);
+}
 pop(){
   this.sp = (this.sp + 1) & 255;
   return this.ram[0x100 + this.sp];
@@ -658,6 +676,7 @@ zeroFlag(){
   return (this.psw & 0x02) !== 0;
 }
   step() {
+    const pcBefore = this.pc;
     const op = this.ram[this.pc++];
 
     switch(op) {
@@ -702,17 +721,142 @@ case 0xD0: { // BNE
     this.pc += (rel<128?rel:rel-256);
   break;
 }
+// ADC A,#imm
+case 0x88: {
+  const imm = this.ram[this.pc++];
+  const c = this.c ? 1 : 0;
+  const r = this.a + imm + c;
+  this.c = r > 0xFF;
+  this.a = r & 0xFF;
+  this.setZN(this.a);
+  break;
+}
 
+// ADC A,dp
+case 0x84: {
+  const dp = this.ram[this.pc++];
+  const v = this.read(dp);
+  const c = this.c ? 1 : 0;
+  const r = this.a + v + c;
+  this.c = r > 0xFF;
+  this.a = r & 0xFF;
+  this.setZN(this.a);
+  break;
+}
+// SBC A,#imm
+case 0xA8: {
+  const imm = this.ram[this.pc++];
+  const c = this.c ? 0 : 1;
+  const r = this.a - imm - c;
+  this.c = r >= 0;
+  this.a = r & 0xFF;
+  this.setZN(this.a);
+  break;
+}
 case 0xF0: { // BEQ
   const rel = this.ram[this.pc++];
   if (this.zeroFlag())
     this.pc += (rel<128?rel:rel-256);
   break;
 }
-case 0x68: { // CMP A,#imm
-  const v = this.ram[this.pc++];
-  const r = (this.a - v)&255;
-  this.setZN(r);
+// CMP A,#imm
+case 0x68: {
+  const imm = this.ram[this.pc++];
+  const r = this.a - imm;
+  this.c = r >= 0;
+  this.setZN(r & 0xFF);
+  break;
+}
+// INC dp
+case 0xAB: {
+  const dp = this.ram[this.pc++];
+  const v = (this.read(dp) + 1) & 0xFF;
+  this.write(dp, v);
+  this.setZN(v);
+  break;
+}
+
+// DEC dp
+case 0x8B: {
+  const dp = this.ram[this.pc++];
+  const v = (this.read(dp) - 1) & 0xFF;
+  this.write(dp, v);
+  this.setZN(v);
+  break;
+}
+// MOV A,(dp+X)
+case 0xF4: {
+  const dp = this.ram[this.pc++];
+  const addr = (dp + this.x) & 0xFF;
+  this.a = this.read(addr);
+  this.setZN(this.a);
+  break;
+}
+
+// MOV (dp+X),A
+case 0xD4: {
+  const dp = this.ram[this.pc++];
+  const addr = (dp + this.x) & 0xFF;
+  this.write(addr, this.a);
+  break;
+}
+// ADDW YA,dp
+case 0x7A: {
+  const dp = this.ram[this.pc++];
+  const lo = this.read(dp);
+  const hi = this.read((dp+1)&0xFF);
+  const val = lo | (hi<<8);
+
+  const ya = (this.y<<8)|this.a;
+  const r = ya + val;
+
+  this.y = (r >> 8) & 0xFF;
+  this.a = r & 0xFF;
+  this.setZN(this.a);
+  break;
+}
+// SET1 dp.bit
+case 0x02: {
+  const dp = this.ram[this.pc++];
+  const bit = (this.ram[this.pc++] >> 5) & 7;
+  const v = this.read(dp) | (1<<bit);
+  this.write(dp, v);
+  break;
+}
+
+// CLR1 dp.bit
+case 0x12: {
+  const dp = this.ram[this.pc++];
+  const bit = (this.ram[this.pc++] >> 5) & 7;
+  const v = this.read(dp) & ~(1<<bit);
+  this.write(dp, v);
+  break;
+}
+// BCS
+case 0xB0: {
+  const rel = (this.ram[this.pc++]<<24)>>24;
+  if(this.c) this.pc = (this.pc + rel) & 0xFFFF;
+  break;
+}
+
+// BCC
+case 0x90: {
+  const rel = (this.ram[this.pc++]<<24)>>24;
+  if(!this.c) this.pc = (this.pc + rel) & 0xFFFF;
+  break;
+}
+
+// BMI
+case 0x30: {
+  const rel = (this.ram[this.pc++]<<24)>>24;
+  if(this.n) this.pc = (this.pc + rel) & 0xFFFF;
+  break;
+}
+
+// BPL
+case 0x10: {
+  const rel = (this.ram[this.pc++]<<24)>>24;
+  if(!this.n) this.pc = (this.pc + rel) & 0xFFFF;
   break;
 }
 case 0x88: { // ADC A,#imm
@@ -1150,6 +1294,7 @@ document.getElementById('fileInput').onchange = async (e) => {
 
     const dsp = new SNESDSP(spcFile);
 const spc = new SPC700(spcFile, dsp);
+//updateTrace(spc);
     // Render audio
     const totalSamples = SAMPLE_RATE * playDuration;
     //audioBuffer = renderAudio(dsp, totalSamples,spc);
@@ -1211,6 +1356,11 @@ function togglePlay() {
   } else {
     startPlayback();
   }
+}
+function updateTrace(spc){
+  const el = document.getElementById("cpuTrace");
+  el.textContent = spc.traceBuffer;
+  el.scrollTop = el.scrollHeight;
 }
 
 function startPlayback() {
