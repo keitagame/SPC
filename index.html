@@ -519,7 +519,7 @@ while (voice.pitchCounter >= 0x1000) {
           const lo = addr & 0xf;
 if (addr === 0x4c) {
             // KON
-
+console.log("a");
             for (let i = 0; i < 8; i++) {
               if (val & (1 << i)) this._keyOn(i);
             }
@@ -576,7 +576,6 @@ if (addr === 0x4c) {
           
          
         }
-
         getVoiceLevels() {
           return this._voiceLevels || new Float32Array(8);
         }
@@ -730,7 +729,7 @@ if (addr === 0x4c) {
         write(addr, val) {
           addr &= 0xffff;
           val &= 0xff;
-          if (addr === 0xf3) console.log("DSP write", this.dspAddr, val);
+          //if (addr === 0xf3) console.log("DSP write", this.dspAddr, val);
 
           if (addr === 0xf1) {
             this.timerEnable = val;
@@ -753,15 +752,17 @@ this.dspReadBuffer = 0;
 
 // write(0xF2)
 if (addr === 0xf2) {
-    this.dspAddr = val;
+    this.dspAddr = val & 0x7f;   // ★ これが必要
     return;
 }
 
+
 // read(0xF3)
 if (addr === 0xf3) {
-    const out = this.dspReadBuffer;
-    this.dspReadBuffer = this.dsp.regs[this.dspAddr & 0x7f];
-    return out;
+  this.dsp.writeReg(this.dspAddr, val);
+    //const out = this.dspReadBuffer;
+    //this.dspReadBuffer = this.dsp.regs[this.dspAddr & 0x7f];
+    return //out;
 }
 
           if (addr === 0xf2) {
