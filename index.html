@@ -378,8 +378,10 @@ console.log("keyOn");
           const header = this.ram[addr];
           const range = (header >> 4) & 0xf;
           const filter = (header >> 2) & 0x3;
-          const endFlag = !!(header & 0x1);
-          const loopFlag = !!(header & 0x2);
+         // const endFlag = !!(header & 0x1);
+         // const loopFlag = !!(header & 0x2);
+const loopFlag = !!(header & 0x2);
+const endFlag  = !!(header & 0x1);
 
           let p1 = voice._p1,
             p2 = voice._p2;
@@ -391,7 +393,10 @@ console.log("keyOn");
               let s = n === 0 ? byte >> 4 : byte & 0xf;
               if (s >= 8) s -= 16;
               // Apply range
-              s = range <= 12 ? (s << range) >> 1 : s < 0 ? -2048 : 0;
+// Apply range
+s = s << range;
+
+             // s = range <= 12 ? (s << range) >> 1 : s < 0 ? -2048 : 0;
               // Apply filter
               switch (filter) {
                 case 1:
@@ -601,7 +606,8 @@ console.log("a");
       function clamp16(v) {
         return v > 32767 ? 32767 : v < -32768 ? -32768 : v;
       }
-
+let freezeCounter = 0;
+let lastPC = -1;
       // ============================================================
       //  SPC700 CPU 完全実装
       // ============================================================
@@ -629,8 +635,8 @@ console.log("a");
           this.timerCounter = [0, 0, 0];
           this.timerOutput = [0, 0, 0];
           this.timerCycles = [0, 0, 0];
-
-         
+ this.ports = new Uint8Array(4);
+         this.dspReadBuffer = 0;
           this.cycles = 0;
         }
 
@@ -721,6 +727,9 @@ console.log("a");
             this.timerOutput[2] = 0;
             return v;
           }
+if (addr >= 0xf4 && addr <= 0xf7) {
+    return this.ports[addr - 0xf4];
+  }
           // Read-back ports 0xF4-0xF7 (IPL ports)
           if (addr >= 0xffc0) return IPL_ROM[addr - 0xffc0];
           return this.ram[addr];
@@ -745,10 +754,11 @@ console.log("a");
               this.timerOutput[2] = 0;
               this.timerCounter[2] = 0;
             }
+
             return;
           }
 // 追加：DSP 読み出しバッファ
-this.dspReadBuffer = 0;
+
 
 // write(0xF2)
 
@@ -777,6 +787,10 @@ this.dspReadBuffer = 0;
             this.ram[addr] = val;
             return;
           }
+if (addr >= 0xf4 && addr <= 0xf7) {
+    this.ports[addr - 0xf4] = val;
+    return;
+  }
           if (addr >= 0xffc0) return; // ROM read-only
           this.ram[addr] = val;
         }
@@ -821,11 +835,48 @@ this.dspReadBuffer = 0;
             }
           }
         }
+tickTimers() {
+  // Timer 0,1: 8kHz (every 128 CPU cycles)
+  // Timer 2: 64kHz (every 16 cycles)
+  this.timerCycles[0]++;
+  this.timerCycles[1]++;
+  this.timerCycles[2]++;
+
+  for (let i = 0; i < 3; i++) {
+    const limit = i < 2 ? 128 : 16;
+
+    if (this.timerCycles[i] >= limit) {
+      this.timerCycles[i] = 0;
+
+      // enable されているときだけカウント
+      if (this.timerEnable & (1 << i)) {
+        this.timerCounter[i]++;
+
+        if (this.timerCounter[i] >= this.timerTarget[i]) {
+          this.timerCounter[i] = 0;
+          this.timerOutput[i] = (this.timerOutput[i] + 1) & 0x0f;
+        }
+      }
+    }
+  }
+}
 
         // ─── Main instruction decoder ──────────────────────────────
         step() {
           const op = this.fetch();
           let dp, addr, val, src, dst, rel, tmp, ya, lo, hi;
+ const pc = this.pc;
+
+  if (pc === lastPC) {
+    freezeCounter++;
+    if (freezeCounter === 100000) {
+      console.log("POSSIBLE FREEZE at PC", pc.toString(16));
+    }
+  } else {
+    freezeCounter = 0;
+    lastPC = pc;
+  }
+
         // console.log("OP:"+op.toString(16),"PC:"+this.pc.toString(16))
           switch (op) {
             // NOP
@@ -1094,6 +1145,16 @@ case 0x5f: {
               this.x = (this.x + 1) & 0xff;
               break;
             // MOV A,[dp+X]
+// MOV A,[dp+X]
+case 0xe7: {
+  const dp = this.dp() | ((this.fetch() + this.x) & 0xff); // 0x000–0x1FF
+  const lo = this.read(dp);
+  const hi = this.read((dp + 1) & 0x1ff);                  // dp ページ内でラップ
+  const addr = lo | (hi << 8);
+  this.a = this.setNZ(this.read(addr & 0xffff));
+  break;
+}
+
             case 0xe7:{
             
 
@@ -1109,6 +1170,18 @@ const hi = this.read((dp8 + 1) & 0xFF);
               break;
             }
             // MOV A,[dp]+Y
+// MOV A,[dp]+Y
+// MOV A,[dp]+Y
+case 0xf7: {
+  const dp = this.dp() | this.fetch();        // dp + 0..255
+  const lo = this.read(dp);
+  const hi = this.read((dp + 1) & 0x1ff);      // dp ページ内でラップ
+  const addr = (lo | (hi << 8)) + this.y;
+  this.a = this.setNZ(this.read(addr & 0xffff));
+  break;
+}
+
+
             case 0xf7:{
               const dp_base = this.dp(); // 0x000 or 0x100
 const ofs = (this.fetch() + this.x) & 0xFF;
