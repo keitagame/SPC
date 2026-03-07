@@ -729,7 +729,7 @@ console.log("a");
         write(addr, val) {
           addr &= 0xffff;
           val &= 0xff;
-          //if (addr === 0xf3) console.log("DSP write", this.dspAddr, val);
+         // if (addr === 0xf3) console.log("DSP write", this.dspAddr, val);
 
           if (addr === 0xf1) {
             this.timerEnable = val;
@@ -751,19 +751,7 @@ console.log("a");
 this.dspReadBuffer = 0;
 
 // write(0xF2)
-if (addr === 0xf2) {
-    this.dspAddr = val & 0x7f;   // ★ これが必要
-    return;
-}
 
-
-// read(0xF3)
-if (addr === 0xf3) {
-  this.dsp.writeReg(this.dspAddr, val);
-    //const out = this.dspReadBuffer;
-    //this.dspReadBuffer = this.dsp.regs[this.dspAddr & 0x7f];
-    return //out;
-}
 
           if (addr === 0xf2) {
             this.dspAddr = val;
